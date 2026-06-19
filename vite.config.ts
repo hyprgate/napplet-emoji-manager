@@ -8,7 +8,7 @@ export default defineConfig({
     svelte(),
     nip5aManifest({
       nappletType: 'emoji-manager',
-      requires: ['identity', 'relay', 'storage', 'resource'],
+      requires: ['identity', 'relay', 'storage', 'resource', 'theme'],
       artifactMode: 'single-file',
     }),
   ],
