@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Recycled from napps/feed/src/components/EmojiSelector.svelte — the proven
+  // Recycled from napplets/feed/src/components/EmojiSelector.svelte — the proven
   // Unicode picker (category tabs + fuzzy "Find emoji" search). Rendered inline
   // and always-open here, and stays open across selections so the user can add
   // several emoji in a row. Search results are split by confidence: strong
