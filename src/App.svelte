@@ -498,7 +498,7 @@
     cursor: not-allowed;
   }
 
-  @media (max-width: 720px) {
+  @media (max-width: 520px) {
     .workspace {
       grid-template-columns: 1fr;
     }
