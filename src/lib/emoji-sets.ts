@@ -1,4 +1,5 @@
 import type { NostrEvent } from '@hyprgate/types';
+import { parseCustomEmojiTags, type CustomEmojiResource } from '@hyprgate/utils';
 import { relay, storage, type Subscription } from "@napplet/sdk";
 
 export const KIND_USER_EMOJI_LIST = 10030 as const;
@@ -9,22 +10,41 @@ export const USER_LIST_STORAGE_KEY = 'emoji-manager:user-list:v1';
 export const SHORTCODE_RE = /^[A-Za-z0-9_-]+$/;
 
 /**
- * A parsed kind 30030 emoji set authored by the user. `emojis` holds the
- * standard Unicode emoji characters in the set.
+ * A parsed standard Unicode or NIP-30 custom emoji entry from kind 10030/30030
+ * `emoji` tags.
  */
+export type EmojiListItem =
+  | {
+      type: 'standard';
+      key: string;
+      label: string;
+      content: string;
+      tag: string[];
+    }
+  | {
+      type: 'custom';
+      key: string;
+      label: string;
+      content: string;
+      shortcode: string;
+      imageUrl: string;
+      address?: string;
+      tag: string[];
+    };
+
 export interface EmojiSetSummary {
   address: string;
   identifier: string;
   title: string;
   pubkey: string;
   createdAt: number;
-  emojis: string[];
+  emojis: EmojiListItem[];
 }
 
 export interface PublishEmojiSetInput {
   identifier: string;
   title: string;
-  emojis: string[];
+  emojis: EmojiListItem[];
 }
 
 export interface PublishResult {
@@ -38,7 +58,7 @@ export interface EmojiManagerState {
   error: string | null;
   pubkey: string | null;
   /** The user's primary quick-react list (kind 10030). */
-  userList: string[];
+  userList: EmojiListItem[];
   /** The user's named emoji sets (kind 30030). */
   sets: EmojiSetSummary[];
   publishing: boolean;
@@ -48,7 +68,7 @@ export interface EmojiManagerState {
 export interface EmojiManagerStore {
   state: EmojiManagerState;
   init(pubkey: string): void;
-  publishUserList(emojis: string[]): Promise<NostrEvent>;
+  publishUserList(emojis: EmojiListItem[]): Promise<NostrEvent>;
   publishSet(input: PublishEmojiSetInput): Promise<PublishResult>;
   destroy(): void;
 }
@@ -63,6 +83,73 @@ export function uniqueEmojis(emojis: string[]): string[] {
     result.push(trimmed);
   }
   return result;
+}
+
+export function standardEmojiItem(emoji: string): EmojiListItem | null {
+  const content = emoji.trim();
+  if (!content) return null;
+  return {
+    type: 'standard',
+    key: `standard:${content}`,
+    label: content,
+    content,
+    tag: ['emoji', content],
+  };
+}
+
+function customEmojiItem(resource: CustomEmojiResource, fallbackAddress?: string): EmojiListItem {
+  const address = resource.address ?? fallbackAddress;
+  const tag = [
+    'emoji',
+    resource.shortcode,
+    resource.imageUrl,
+    ...(address ? [address] : []),
+  ];
+  return {
+    type: 'custom',
+    key: `custom:${resource.shortcode}`,
+    label: `:${resource.shortcode}:`,
+    content: `:${resource.shortcode}:`,
+    shortcode: resource.shortcode,
+    imageUrl: resource.imageUrl,
+    ...(address ? { address } : {}),
+    tag,
+  };
+}
+
+function emojiItemFromTag(tag: string[], fallbackAddress?: string): EmojiListItem | null {
+  if (tag[0] !== 'emoji') return null;
+  if (typeof tag[1] !== 'string' || tag[1].length === 0) return null;
+
+  if (tag[2] === undefined) {
+    return standardEmojiItem(tag[1]);
+  }
+
+  const [resource] = parseCustomEmojiTags([tag]);
+  return resource ? customEmojiItem(resource, fallbackAddress) : null;
+}
+
+export function customEmojiItemFromInput(shortcode: string, imageUrl: string): EmojiListItem | null {
+  return emojiItemFromTag(['emoji', shortcode.trim(), imageUrl.trim()]);
+}
+
+export function uniqueEmojiItems(items: EmojiListItem[]): EmojiListItem[] {
+  const seen = new Set<string>();
+  const result: EmojiListItem[] = [];
+  for (const item of items) {
+    if (seen.has(item.key)) continue;
+    seen.add(item.key);
+    result.push({ ...item, tag: [...item.tag] } as EmojiListItem);
+  }
+  return result;
+}
+
+export function parseEmojiItemsFromTags(tags: string[][], fallbackAddress?: string): EmojiListItem[] {
+  return uniqueEmojiItems(
+    tags
+      .map((tag) => emojiItemFromTag(tag, fallbackAddress))
+      .filter((item): item is EmojiListItem => item !== null),
+  );
 }
 
 /** Whether a user-typed identifier would normalize to a valid `d` tag. */
@@ -81,16 +168,12 @@ export function normalizeIdentifier(value: string): string {
 }
 
 /**
- * Read the standard Unicode emoji from an event. Standard emoji are stored as
- * two-element `["emoji", "😀"]` tags — distinguished from NIP-30 custom emoji,
- * which carry a third element (the image URL) and are ignored here.
+ * Read the standard Unicode emoji from an event.
  */
 export function parseStandardEmojis(event: NostrEvent): string[] {
-  return uniqueEmojis(
-    event.tags
-      .filter((tag) => tag[0] === 'emoji' && typeof tag[1] === 'string' && tag[2] === undefined)
-      .map((tag) => tag[1] as string),
-  );
+  return parseEmojiItemsFromTags(event.tags)
+    .filter((item): item is Extract<EmojiListItem, { type: 'standard' }> => item.type === 'standard')
+    .map((item) => item.content);
 }
 
 /** Parse a kind 30030 event into a summary, or null if malformed. */
@@ -98,33 +181,34 @@ export function parseEmojiSetEvent(event: NostrEvent): EmojiSetSummary | null {
   const identifier = event.tags.find((tag) => tag[0] === 'd')?.[1];
   if (!identifier) return null;
   const title = event.tags.find((tag) => tag[0] === 'title')?.[1] ?? identifier;
+  const address = `${KIND_EMOJI_SET}:${event.pubkey}:${identifier}`;
   return {
-    address: `${KIND_EMOJI_SET}:${event.pubkey}:${identifier}`,
+    address,
     identifier,
     title,
     pubkey: event.pubkey,
     createdAt: event.created_at,
-    emojis: parseStandardEmojis(event),
+    emojis: parseEmojiItemsFromTags(event.tags, address),
   };
 }
 
 /**
- * Build kind 10030 tags. Replaces the standard emoji while preserving anything
- * else already on the list (set references via `a`, NIP-30 custom emoji tags).
+ * Build kind 10030 tags. Replaces the visible emoji list while preserving
+ * non-emoji tags such as set references.
  */
-export function buildUserListTags(existing: NostrEvent | null, emojis: string[]): string[][] {
+export function buildUserListTags(existing: NostrEvent | null, emojis: EmojiListItem[]): string[][] {
   const preserved = (existing?.tags ?? []).filter(
-    (tag) => !(tag[0] === 'emoji' && tag[2] === undefined),
+    (tag) => tag[0] !== 'emoji',
   );
-  return [...preserved, ...uniqueEmojis(emojis).map((emoji) => ['emoji', emoji])];
+  return [...preserved, ...uniqueEmojiItems(emojis).map((emoji) => [...emoji.tag])];
 }
 
 /** Build the tag list for a kind 30030 emoji set event. */
-export function buildEmojiSetTags(identifier: string, title: string, emojis: string[]): string[][] {
+export function buildEmojiSetTags(identifier: string, title: string, emojis: EmojiListItem[]): string[][] {
   return [
     ['d', identifier],
     ['title', title.trim() || identifier],
-    ...uniqueEmojis(emojis).map((emoji) => ['emoji', emoji]),
+    ...uniqueEmojiItems(emojis).map((emoji) => [...emoji.tag]),
   ];
 }
 
@@ -146,8 +230,8 @@ function recomputeSets(ctx: EmojiManagerContext): void {
 
 function recomputeUserList(ctx: EmojiManagerContext): void {
   if (ctx.userListEvent) {
-    ctx.state.userList = parseStandardEmojis(ctx.userListEvent);
-    void storage.setItem(USER_LIST_STORAGE_KEY, JSON.stringify(ctx.state.userList));
+    ctx.state.userList = parseEmojiItemsFromTags(ctx.userListEvent.tags);
+    void storage.setItem(USER_LIST_STORAGE_KEY, JSON.stringify(ctx.state.userList.map((item) => item.tag)));
   }
   ctx.notify();
 }
@@ -170,13 +254,34 @@ async function loadCachedUserList(ctx: EmojiManagerContext): Promise<void> {
   try {
     const raw = await storage.getItem(USER_LIST_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed) && ctx.state.userList.length === 0) {
-      ctx.state.userList = uniqueEmojis(parsed.filter((v): v is string => typeof v === 'string'));
+    const cached = parseCachedEmojiItems(parsed);
+    if (cached.length > 0 && ctx.state.userList.length === 0) {
+      ctx.state.userList = cached;
       ctx.notify();
     }
   } catch {
     // ignore cache errors — relay is the source of truth
   }
+}
+
+function parseCachedEmojiItems(value: unknown): EmojiListItem[] {
+  if (!Array.isArray(value)) return [];
+  const tags: string[][] = [];
+  for (const item of value) {
+    if (typeof item === 'string') {
+      tags.push(['emoji', item]);
+    } else if (Array.isArray(item) && item.every((part) => typeof part === 'string')) {
+      tags.push(item);
+    } else if (
+      item
+      && typeof item === 'object'
+      && Array.isArray((item as { tag?: unknown }).tag)
+      && (item as { tag: unknown[] }).tag.every((part) => typeof part === 'string')
+    ) {
+      tags.push([...(item as { tag: string[] }).tag]);
+    }
+  }
+  return parseEmojiItemsFromTags(tags);
 }
 
 function ingestInitEvent(ctx: EmojiManagerContext, event: NostrEvent): void {
@@ -227,13 +332,13 @@ function init(ctx: EmojiManagerContext, pubkey: string): void {
   }
 }
 
-async function publishUserList(ctx: EmojiManagerContext, emojis: string[]): Promise<NostrEvent> {
+async function publishUserList(ctx: EmojiManagerContext, emojis: EmojiListItem[]): Promise<NostrEvent> {
   if (!ctx.state.pubkey) throw new Error('You must be signed in to publish');
   ctx.state.publishing = true;
   ctx.state.error = null;
   ctx.notify();
   try {
-    const next = uniqueEmojis(emojis);
+    const next = uniqueEmojiItems(emojis);
     const event = (await relay.publish({
       kind: KIND_USER_EMOJI_LIST,
       content: '',
@@ -242,7 +347,7 @@ async function publishUserList(ctx: EmojiManagerContext, emojis: string[]): Prom
     })) as NostrEvent;
     ctx.userListEvent = event ?? ctx.userListEvent;
     ctx.state.userList = next;
-    void storage.setItem(USER_LIST_STORAGE_KEY, JSON.stringify(next));
+    void storage.setItem(USER_LIST_STORAGE_KEY, JSON.stringify(next.map((item) => item.tag)));
     ctx.notify();
     return event;
   } catch (error) {
@@ -258,7 +363,7 @@ async function publishUserList(ctx: EmojiManagerContext, emojis: string[]): Prom
 async function publishSet(ctx: EmojiManagerContext, input: PublishEmojiSetInput): Promise<PublishResult> {
   if (!ctx.state.pubkey) throw new Error('You must be signed in to publish');
   const identifier = normalizeIdentifier(input.identifier);
-  const emojis = uniqueEmojis(input.emojis);
+  const emojis = uniqueEmojiItems(input.emojis);
   if (emojis.length === 0) throw new Error('Add at least one emoji before publishing');
 
   ctx.state.publishing = true;

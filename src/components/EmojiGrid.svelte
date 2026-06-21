@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { resourceImage } from '@hyprgate/utils';
+  import type { EmojiListItem } from '../lib/emoji-sets';
+
   interface Props {
-    emojis: string[];
-    onremove: (emoji: string) => void;
+    emojis: EmojiListItem[];
+    onremove: (emoji: EmojiListItem) => void;
   }
 
   let { emojis, onremove }: Props = $props();
@@ -11,15 +14,20 @@
   {#if emojis.length === 0}
     <p class="empty">No emoji yet — pick some from the library to build your quick-react list.</p>
   {:else}
-    {#each emojis as emoji (emoji)}
+    {#each emojis as emoji (emoji.key)}
       <button
         type="button"
         class="chip"
-        title={`Remove ${emoji}`}
-        aria-label={`Remove ${emoji}`}
+        class:custom={emoji.type === 'custom'}
+        title={`Remove ${emoji.content}`}
+        aria-label={`Remove ${emoji.content}`}
         onclick={() => onremove(emoji)}
       >
-        <span class="glyph">{emoji}</span>
+        {#if emoji.type === 'custom'}
+          <img use:resourceImage={emoji.imageUrl} alt="" loading="lazy" />
+        {:else}
+          <span class="glyph">{emoji.content}</span>
+        {/if}
         <span class="x">×</span>
       </button>
     {/each}
@@ -64,6 +72,17 @@
 
   .chip:hover {
     border-color: var(--hg-accent-red, #ff6b6b);
+  }
+
+  .chip.custom {
+    padding: 4px;
+  }
+
+  .chip.custom img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
   }
 
   .x {

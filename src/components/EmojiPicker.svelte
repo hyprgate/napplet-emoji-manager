@@ -7,16 +7,21 @@
   import {
     EMOJI_GROUPS,
     getEmojiCatalogByGroup,
+    resourceImage,
     searchEmojiCatalog,
     type EmojiCatalogEntry,
   } from '@hyprgate/utils';
+  import { standardEmojiItem, type EmojiListItem } from '../lib/emoji-sets';
+
+  const CUSTOM_GROUP = 'custom';
 
   interface Props {
-    selected?: string[];
-    onselect: (emoji: string, entry: EmojiCatalogEntry) => void;
+    selected?: EmojiListItem[];
+    custom?: EmojiListItem[];
+    onselect: (emoji: EmojiListItem) => void;
   }
 
-  let { selected = [], onselect }: Props = $props();
+  let { selected = [], custom = [], onselect }: Props = $props();
 
   let query = $state('');
   let searchEl: HTMLInputElement | undefined = $state();
@@ -26,8 +31,25 @@
   const results = $derived(trimmedQuery ? searchEmojiCatalog(trimmedQuery, { limit: 200 }) : []);
   const highMatches = $derived(results.filter((r) => r.confidence === 'high').map((r) => r.entry));
   const lowMatches = $derived(results.filter((r) => r.confidence !== 'high').map((r) => r.entry));
-  const browseEntries = $derived(trimmedQuery ? [] : getEmojiCatalogByGroup(selectedGroup));
-  const selectedSet = $derived(new Set(selected));
+  const customResults = $derived(trimmedQuery ? custom.filter((item) => matchesCustom(item, trimmedQuery)) : []);
+  const browseEntries = $derived(trimmedQuery || selectedGroup === CUSTOM_GROUP ? [] : getEmojiCatalogByGroup(selectedGroup));
+  const browseCustom = $derived(!trimmedQuery && selectedGroup === CUSTOM_GROUP ? custom : []);
+  const groups = $derived(custom.length > 0 ? [CUSTOM_GROUP, ...EMOJI_GROUPS] : EMOJI_GROUPS);
+  const selectedSet = $derived(new Set(selected.map((item) => item.key)));
+
+  function selectCatalogEntry(entry: EmojiCatalogEntry): void {
+    const item = standardEmojiItem(entry.emoji);
+    if (item) onselect(item);
+  }
+
+  function matchesCustom(item: EmojiListItem, value: string): boolean {
+    if (item.type !== 'custom') return false;
+    const q = value.toLowerCase();
+    return item.shortcode.toLowerCase().includes(q)
+      || item.content.toLowerCase().includes(q)
+      || item.imageUrl.toLowerCase().includes(q)
+      || (item.address?.toLowerCase().includes(q) ?? false);
+  }
 </script>
 
 <div class="emoji-picker">
@@ -41,7 +63,7 @@
 
   {#if !trimmedQuery}
     <div class="emoji-groups" aria-label="Emoji groups">
-      {#each EMOJI_GROUPS as group}
+      {#each groups as group}
         <button
           type="button"
           class:active={selectedGroup === group}
@@ -54,6 +76,27 @@
 
   <div class="results" aria-live="polite">
     {#if trimmedQuery}
+      {#if customResults.length > 0}
+        <div class="band-label">Custom</div>
+        <div class="emoji-grid">
+          {#each customResults as item (item.key)}
+            <button
+              type="button"
+              class="emoji-cell custom"
+              class:selected={selectedSet.has(item.key)}
+              title={item.content}
+              aria-label={item.content}
+              aria-pressed={selectedSet.has(item.key)}
+              onclick={() => onselect(item)}
+            >
+              {#if item.type === 'custom'}
+                <img use:resourceImage={item.imageUrl} alt="" loading="lazy" />
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
+
       {#if highMatches.length > 0}
         <div class="band-label">Best matches</div>
         <div class="emoji-grid big">
@@ -61,11 +104,11 @@
             <button
               type="button"
               class="emoji-cell big"
-              class:selected={selectedSet.has(entry.emoji)}
+              class:selected={selectedSet.has(`standard:${entry.emoji}`)}
               title={`${entry.emoji} ${entry.name}`}
               aria-label={entry.name}
-              aria-pressed={selectedSet.has(entry.emoji)}
-              onclick={() => onselect(entry.emoji, entry)}
+              aria-pressed={selectedSet.has(`standard:${entry.emoji}`)}
+              onclick={() => selectCatalogEntry(entry)}
             >{entry.emoji}</button>
           {/each}
         </div>
@@ -78,33 +121,57 @@
             <button
               type="button"
               class="emoji-cell"
-              class:selected={selectedSet.has(entry.emoji)}
+              class:selected={selectedSet.has(`standard:${entry.emoji}`)}
               title={`${entry.emoji} ${entry.name}`}
               aria-label={entry.name}
-              aria-pressed={selectedSet.has(entry.emoji)}
-              onclick={() => onselect(entry.emoji, entry)}
+              aria-pressed={selectedSet.has(`standard:${entry.emoji}`)}
+              onclick={() => selectCatalogEntry(entry)}
             >{entry.emoji}</button>
           {/each}
         </div>
       {/if}
 
-      {#if results.length === 0}
+      {#if results.length === 0 && customResults.length === 0}
         <p class="empty">No emoji match “{trimmedQuery}”.</p>
       {/if}
     {:else}
-      <div class="emoji-grid">
-        {#each browseEntries as entry (entry.emoji + entry.name)}
-          <button
-            type="button"
-            class="emoji-cell"
-            class:selected={selectedSet.has(entry.emoji)}
-            title={`${entry.emoji} ${entry.name}`}
-            aria-label={entry.name}
-            aria-pressed={selectedSet.has(entry.emoji)}
-            onclick={() => onselect(entry.emoji, entry)}
-          >{entry.emoji}</button>
-        {/each}
-      </div>
+      {#if selectedGroup === CUSTOM_GROUP}
+        {#if browseCustom.length > 0}
+          <div class="emoji-grid">
+            {#each browseCustom as item (item.key)}
+              <button
+                type="button"
+                class="emoji-cell custom"
+                class:selected={selectedSet.has(item.key)}
+                title={item.content}
+                aria-label={item.content}
+                aria-pressed={selectedSet.has(item.key)}
+                onclick={() => onselect(item)}
+              >
+                {#if item.type === 'custom'}
+                  <img use:resourceImage={item.imageUrl} alt="" loading="lazy" />
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty">No custom emoji.</p>
+        {/if}
+      {:else}
+        <div class="emoji-grid">
+          {#each browseEntries as entry (entry.emoji + entry.name)}
+            <button
+              type="button"
+              class="emoji-cell"
+              class:selected={selectedSet.has(`standard:${entry.emoji}`)}
+              title={`${entry.emoji} ${entry.name}`}
+              aria-label={entry.name}
+              aria-pressed={selectedSet.has(`standard:${entry.emoji}`)}
+              onclick={() => selectCatalogEntry(entry)}
+            >{entry.emoji}</button>
+          {/each}
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
@@ -206,6 +273,17 @@
   .emoji-cell.big {
     border-radius: 6px;
     font-size: 40px;
+  }
+
+  .emoji-cell.custom {
+    padding: 4px;
+  }
+
+  .emoji-cell.custom img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
   }
 
   .emoji-cell:hover {
