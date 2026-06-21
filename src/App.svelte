@@ -231,7 +231,6 @@
       <div class="pane-label">Emoji library</div>
       <div class="pane-body">
         <div class="picker-tools">
-          <EmojiPicker selected={draftEmojis} custom={customItems(snap.userList, snap.sets)} onselect={addEmoji} />
           <form class="custom-entry" onsubmit={(event) => { event.preventDefault(); addCustomEmoji(); }}>
             <label class="field">
               <span>Shortcode</span>
@@ -243,6 +242,7 @@
             </label>
             <button type="submit" class="add-custom">Add custom</button>
           </form>
+          <EmojiPicker selected={draftEmojis} custom={customItems(snap.userList, snap.sets)} onselect={addEmoji} />
         </div>
       </div>
     </section>
@@ -428,7 +428,7 @@
 
   .picker-tools {
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
     gap: 8px;
     height: 100%;
     min-height: 0;
@@ -439,8 +439,8 @@
     grid-template-columns: minmax(96px, 0.7fr) minmax(160px, 1fr) auto;
     align-items: end;
     gap: 6px;
-    padding-top: 8px;
-    border-top: 1px solid var(--hg-border-muted, #242424);
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--hg-border-muted, #242424);
   }
 
   .add-custom {
