@@ -2,8 +2,10 @@
   import { identity } from '@napplet/sdk';
   import {
     createEmojiManagerStore,
+    customEmojiItemFromInput,
     isValidIdentifier,
     type EmojiSetSummary,
+    type EmojiListItem,
   } from './lib/emoji-sets';
   import EmojiPicker from './components/EmojiPicker.svelte';
   import EmojiGrid from './components/EmojiGrid.svelte';
@@ -32,7 +34,9 @@
   let draftTitle = $state('');
   let draftIdentifier = $state('');
   let identifierTouched = $state(false);
-  let draftEmojis = $state<string[]>([]);
+  let draftEmojis = $state<EmojiListItem[]>([]);
+  let customShortcode = $state('');
+  let customResource = $state('');
   let dirty = $state(false);
   let status = $state<string | null>(null);
   let bootstrapped = false;
@@ -115,16 +119,38 @@
     status = null;
   }
 
-  function addEmoji(emoji: string): void {
-    if (draftEmojis.includes(emoji)) return;
+  function addEmoji(emoji: EmojiListItem): void {
+    if (draftEmojis.some((item) => item.key === emoji.key)) return;
     draftEmojis = [...draftEmojis, emoji];
     dirty = true;
     status = null;
   }
 
-  function removeEmoji(emoji: string): void {
-    draftEmojis = draftEmojis.filter((e) => e !== emoji);
+  function removeEmoji(emoji: EmojiListItem): void {
+    draftEmojis = draftEmojis.filter((item) => item.key !== emoji.key);
     dirty = true;
+  }
+
+  function customItems(userList: EmojiListItem[], sets: EmojiSetSummary[]): EmojiListItem[] {
+    const seen = new Set<string>();
+    const result: EmojiListItem[] = [];
+    for (const item of [...userList, ...sets.flatMap((set) => set.emojis)]) {
+      if (item.type !== 'custom' || seen.has(item.key)) continue;
+      seen.add(item.key);
+      result.push(item);
+    }
+    return result;
+  }
+
+  function addCustomEmoji(): void {
+    const item = customEmojiItemFromInput(customShortcode, customResource);
+    if (!item) {
+      status = 'Custom emoji needs a valid shortcode and image resource';
+      return;
+    }
+    addEmoji(item);
+    customShortcode = '';
+    customResource = '';
   }
 
   async function publish(): Promise<void> {
@@ -204,7 +230,20 @@
     <section class="picker-pane">
       <div class="pane-label">Emoji library</div>
       <div class="pane-body">
-        <EmojiPicker selected={draftEmojis} onselect={addEmoji} />
+        <div class="picker-tools">
+          <EmojiPicker selected={draftEmojis} custom={customItems(snap.userList, snap.sets)} onselect={addEmoji} />
+          <form class="custom-entry" onsubmit={(event) => { event.preventDefault(); addCustomEmoji(); }}>
+            <label class="field">
+              <span>Shortcode</span>
+              <input bind:value={customShortcode} placeholder="blobcat" maxlength="64" />
+            </label>
+            <label class="field resource-field">
+              <span>Image resource</span>
+              <input bind:value={customResource} placeholder="https://... or blossom:sha256:..." />
+            </label>
+            <button type="submit" class="add-custom">Add custom</button>
+          </form>
+        </div>
       </div>
     </section>
 
@@ -387,6 +426,41 @@
     overflow: hidden;
   }
 
+  .picker-tools {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 8px;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .custom-entry {
+    display: grid;
+    grid-template-columns: minmax(96px, 0.7fr) minmax(160px, 1fr) auto;
+    align-items: end;
+    gap: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--hg-border-muted, #242424);
+  }
+
+  .add-custom {
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--hg-accent-cyan, #82d8f7);
+    border-radius: 4px;
+    background: var(--hg-surface, #101010);
+    color: var(--hg-accent-cyan, #82d8f7);
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .add-custom:hover {
+    background: var(--hg-accent-cyan, #82d8f7);
+    color: var(--hg-bg-base, #050505);
+  }
+
   .actions {
     display: flex;
     align-items: center;
@@ -422,5 +496,15 @@
   .publish:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  @media (max-width: 720px) {
+    .workspace {
+      grid-template-columns: 1fr;
+    }
+
+    .custom-entry {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

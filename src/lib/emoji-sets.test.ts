@@ -5,11 +5,14 @@ import {
   KIND_USER_EMOJI_LIST,
   buildEmojiSetTags,
   buildUserListTags,
+  customEmojiItemFromInput,
   createEmojiManagerStore,
   isValidIdentifier,
   normalizeIdentifier,
+  parseEmojiItemsFromTags,
   parseEmojiSetEvent,
   parseStandardEmojis,
+  standardEmojiItem,
   uniqueEmojis,
 } from './emoji-sets';
 import { relay, storage } from '@napplet/sdk';
@@ -27,6 +30,7 @@ vi.mock('@napplet/sdk', () => ({
 }));
 
 const PUBKEY = 'a'.repeat(64);
+const BLOB_TAG = ['emoji', 'blobcat', 'https://emoji.example/blobcat.png'];
 
 function makeEvent(overrides: Partial<NostrEvent>): NostrEvent {
   return {
@@ -39,6 +43,12 @@ function makeEvent(overrides: Partial<NostrEvent>): NostrEvent {
     sig: 'sig',
     ...overrides,
   };
+}
+
+function emoji(content: string) {
+  const item = standardEmojiItem(content);
+  if (!item) throw new Error(`invalid emoji fixture: ${content}`);
+  return item;
 }
 
 describe('pure helpers', () => {
@@ -58,52 +68,97 @@ describe('pure helpers', () => {
       tags: [
         ['emoji', '😀'],
         ['emoji', '❤️'],
-        ['emoji', 'blobcat', 'https://emoji.example/blobcat.png'],
+        BLOB_TAG,
         ['a', '30030:x:y'],
       ],
     }));
     expect(emojis).toEqual(['😀', '❤️']);
   });
 
-  it('parses a kind 30030 set of standard emoji', () => {
+  it('parses standard and custom emoji items from tags', () => {
+    const items = parseEmojiItemsFromTags([
+      ['emoji', '😀'],
+      BLOB_TAG,
+      ['emoji', 'blobcat', 'https://emoji.example/duplicate.png'],
+      ['emoji', 'bad shortcode', 'https://emoji.example/bad.png'],
+      ['emoji', 'javascript', 'javascript:alert(1)'],
+    ], `${KIND_EMOJI_SET}:${PUBKEY}:cats`);
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      type: 'standard',
+      key: 'standard:😀',
+      content: '😀',
+      tag: ['emoji', '😀'],
+    });
+    expect(items[1]).toMatchObject({
+      type: 'custom',
+      key: 'custom:blobcat',
+      content: ':blobcat:',
+      shortcode: 'blobcat',
+      imageUrl: 'https://emoji.example/blobcat.png',
+      address: `${KIND_EMOJI_SET}:${PUBKEY}:cats`,
+      tag: ['emoji', 'blobcat', 'https://emoji.example/blobcat.png', `${KIND_EMOJI_SET}:${PUBKEY}:cats`],
+    });
+  });
+
+  it('creates a custom emoji item from shortcode and resource input', () => {
+    expect(customEmojiItemFromInput(' blobcat ', ' https://emoji.example/blobcat.png ')).toMatchObject({
+      type: 'custom',
+      key: 'custom:blobcat',
+      content: ':blobcat:',
+      shortcode: 'blobcat',
+      imageUrl: 'https://emoji.example/blobcat.png',
+      tag: BLOB_TAG,
+    });
+    expect(customEmojiItemFromInput('bad shortcode', 'https://emoji.example/blobcat.png')).toBeNull();
+    expect(customEmojiItemFromInput('blobcat', 'javascript:alert(1)')).toBeNull();
+  });
+
+  it('parses a kind 30030 set of standard and custom emoji', () => {
     const summary = parseEmojiSetEvent(makeEvent({
       kind: KIND_EMOJI_SET,
       created_at: 99,
-      tags: [['d', 'reactions'], ['title', 'Reactions'], ['emoji', '😀'], ['emoji', '🔥']],
+      tags: [['d', 'reactions'], ['title', 'Reactions'], ['emoji', '😀'], BLOB_TAG],
     }));
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       address: `${KIND_EMOJI_SET}:${PUBKEY}:reactions`,
       identifier: 'reactions',
       title: 'Reactions',
       pubkey: PUBKEY,
       createdAt: 99,
-      emojis: ['😀', '🔥'],
+    });
+    expect(summary?.emojis.map((item) => item.content)).toEqual(['😀', ':blobcat:']);
+    expect(summary?.emojis[1]).toMatchObject({
+      type: 'custom',
+      address: `${KIND_EMOJI_SET}:${PUBKEY}:reactions`,
     });
   });
 
   it('builds a 30030 set tag list', () => {
-    expect(buildEmojiSetTags('reactions', 'Reactions', ['😀', '😀', '🔥'])).toEqual([
+    const blobcat = parseEmojiItemsFromTags([BLOB_TAG])[0]!;
+    expect(buildEmojiSetTags('reactions', 'Reactions', [emoji('😀'), emoji('😀'), blobcat])).toEqual([
       ['d', 'reactions'],
       ['title', 'Reactions'],
       ['emoji', '😀'],
-      ['emoji', '🔥'],
+      BLOB_TAG,
     ]);
   });
 
-  it('builds 10030 tags, replacing standard emoji but preserving set refs and custom emoji', () => {
+  it('builds 10030 tags, replacing emoji while preserving set refs', () => {
     const existing = makeEvent({
       kind: KIND_USER_EMOJI_LIST,
       tags: [
         ['a', '30030:x:cats'],
-        ['emoji', 'blobcat', 'https://emoji.example/blobcat.png'],
+        ['emoji', 'oldcat', 'https://emoji.example/oldcat.png'],
         ['emoji', '😢'],
       ],
     });
-    expect(buildUserListTags(existing, ['😀', '🔥'])).toEqual([
+    const blobcat = parseEmojiItemsFromTags([BLOB_TAG])[0]!;
+    expect(buildUserListTags(existing, [emoji('😀'), blobcat])).toEqual([
       ['a', '30030:x:cats'],
-      ['emoji', 'blobcat', 'https://emoji.example/blobcat.png'],
       ['emoji', '😀'],
-      ['emoji', '🔥'],
+      BLOB_TAG,
     ]);
   });
 });
@@ -129,26 +184,27 @@ describe('store', () => {
     const store = createEmojiManagerStore();
     store.init(PUBKEY);
 
-    onEvent!(makeEvent({ kind: KIND_USER_EMOJI_LIST, created_at: 5, tags: [['emoji', '😀'], ['emoji', '❤️']] }));
+    onEvent!(makeEvent({ kind: KIND_USER_EMOJI_LIST, created_at: 5, tags: [['emoji', '😀'], BLOB_TAG] }));
     onEvent!(makeEvent({ kind: KIND_EMOJI_SET, created_at: 7, tags: [['d', 'fire'], ['title', 'Fire'], ['emoji', '🔥']] }));
     onEose!();
 
     expect(store.state.loaded).toBe(true);
-    expect(store.state.userList).toEqual(['😀', '❤️']);
+    expect(store.state.userList.map((item) => item.content)).toEqual(['😀', ':blobcat:']);
     expect(store.state.sets.map((s) => s.identifier)).toEqual(['fire']);
   });
 
   it('publishes the user list as a kind 10030 event', async () => {
     const store = createEmojiManagerStore();
     store.init(PUBKEY);
-    await store.publishUserList(['😀', '🔥', '😀']);
+    const blobcat = parseEmojiItemsFromTags([BLOB_TAG])[0]!;
+    await store.publishUserList([emoji('😀'), blobcat, emoji('😀')]);
 
     expect(relay.publish).toHaveBeenCalledWith(expect.objectContaining({
       kind: KIND_USER_EMOJI_LIST,
       content: '',
-      tags: [['emoji', '😀'], ['emoji', '🔥']],
+      tags: [['emoji', '😀'], BLOB_TAG],
     }));
-    expect(store.state.userList).toEqual(['😀', '🔥']);
+    expect(store.state.userList.map((item) => item.content)).toEqual(['😀', ':blobcat:']);
   });
 
   it('publishes a named kind 30030 set', async () => {
@@ -156,7 +212,7 @@ describe('store', () => {
     store.init(PUBKEY);
     vi.mocked(relay.publish).mockResolvedValue(makeEvent({ kind: KIND_EMOJI_SET, pubkey: PUBKEY, tags: [['d', 'fire']] }));
 
-    const result = await store.publishSet({ identifier: 'fire', title: 'Fire', emojis: ['🔥', '🔥'] });
+    const result = await store.publishSet({ identifier: 'fire', title: 'Fire', emojis: [emoji('🔥'), emoji('🔥')] });
 
     expect(relay.publish).toHaveBeenCalledWith(expect.objectContaining({
       kind: KIND_EMOJI_SET,
