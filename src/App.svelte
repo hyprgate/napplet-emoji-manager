@@ -178,11 +178,6 @@
 </script>
 
 <main>
-  <header class="top">
-    <h1>Emoji Sets</h1>
-    {#if snap.loading}<span class="muted">loading…</span>{/if}
-  </header>
-
   <nav class="sets" aria-label="Your emoji lists and sets">
     <button type="button" class="set-pill" class:active={isList} onclick={loadUserList}>
       ★ My list
@@ -204,6 +199,7 @@
     <button type="button" class="set-pill new" class:active={mode === 'set' && selectedAddress === null} onclick={startNewSet}>
       ＋ New set
     </button>
+    {#if snap.loading}<span class="muted">loading...</span>{/if}
   </nav>
 
   {#if mode === 'set'}
@@ -288,18 +284,6 @@
     height: 100vh;
     box-sizing: border-box;
     padding: 14px;
-  }
-
-  .top {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 15px;
-    letter-spacing: 0.04em;
   }
 
   .muted {
