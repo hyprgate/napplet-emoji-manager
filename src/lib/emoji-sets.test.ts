@@ -194,8 +194,14 @@ describe('store', () => {
   });
 
   it('publishes the user list as a kind 10030 event', async () => {
+    let onEose: (() => void) | null = null;
+    vi.mocked(relay.subscribe).mockImplementation((_filters, _eventCallback, eoseCallback) => {
+      onEose = eoseCallback as () => void;
+      return { close: vi.fn() };
+    });
     const store = createEmojiManagerStore();
     store.init(PUBKEY);
+    onEose!();
     const blobcat = parseEmojiItemsFromTags([BLOB_TAG])[0]!;
     await store.publishUserList([emoji('😀'), blobcat, emoji('😀')]);
 
@@ -205,6 +211,17 @@ describe('store', () => {
       tags: [['emoji', '😀'], BLOB_TAG],
     }));
     expect(store.state.userList.map((item) => item.content)).toEqual(['😀', ':blobcat:']);
+  });
+
+  it('refuses to publish cached user list before relay load completes', async () => {
+    vi.mocked(storage.getItem).mockResolvedValue(JSON.stringify([['emoji', 'cachedcat', 'https://emoji.example/cached.png']]));
+    const store = createEmojiManagerStore();
+    store.init(PUBKEY);
+
+    await vi.waitFor(() => expect(store.state.userList.map((item) => item.content)).toEqual([':cachedcat:']));
+
+    await expect(store.publishUserList([emoji('😀')])).rejects.toThrow('latest preferred emoji list');
+    expect(relay.publish).not.toHaveBeenCalled();
   });
 
   it('publishes a named kind 30030 set', async () => {
