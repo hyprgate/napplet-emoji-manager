@@ -46,7 +46,7 @@
   const identifierValid = $derived(isValidIdentifier(draftIdentifier));
   const canPublish = $derived(
     !snap.publishing && (isList
-      ? dirty
+      ? snap.loaded && dirty
       : draftEmojis.length > 0 && identifierValid),
   );
 

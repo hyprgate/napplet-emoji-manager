@@ -334,6 +334,7 @@ function init(ctx: EmojiManagerContext, pubkey: string): void {
 
 async function publishUserList(ctx: EmojiManagerContext, emojis: EmojiListItem[]): Promise<NostrEvent> {
   if (!ctx.state.pubkey) throw new Error('You must be signed in to publish');
+  if (!ctx.state.loaded) throw new Error('Wait for your latest preferred emoji list to load before publishing.');
   ctx.state.publishing = true;
   ctx.state.error = null;
   ctx.notify();
