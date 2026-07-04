@@ -144,6 +144,17 @@ export function uniqueEmojiItems(items: EmojiListItem[]): EmojiListItem[] {
   return result;
 }
 
+export function moveEmojiItem(items: EmojiListItem[], fromIndex: number, toIndex: number): EmojiListItem[] {
+  if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) return [...items];
+  if (fromIndex < 0 || fromIndex >= items.length) return [...items];
+  const next = [...items];
+  const [item] = next.splice(fromIndex, 1);
+  if (!item) return [...items];
+  const clampedIndex = Math.max(0, Math.min(toIndex, next.length));
+  next.splice(clampedIndex, 0, item);
+  return next;
+}
+
 export function parseEmojiItemsFromTags(tags: string[][], fallbackAddress?: string): EmojiListItem[] {
   return uniqueEmojiItems(
     tags
@@ -316,7 +327,7 @@ function init(ctx: EmojiManagerContext, pubkey: string): void {
         { kinds: [KIND_EMOJI_SET], authors: [pubkey], limit: 100 },
         { kinds: [KIND_USER_EMOJI_LIST], authors: [pubkey], limit: 1 },
       ],
-      (event: NostrEvent) => ingestInitEvent(ctx, event),
+      (result) => ingestInitEvent(ctx, result.event as NostrEvent),
       () => {
         ctx.state.loading = false;
         ctx.state.loaded = true;

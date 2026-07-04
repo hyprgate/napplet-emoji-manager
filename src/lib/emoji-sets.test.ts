@@ -8,6 +8,7 @@ import {
   customEmojiItemFromInput,
   createEmojiManagerStore,
   isValidIdentifier,
+  moveEmojiItem,
   normalizeIdentifier,
   parseEmojiItemsFromTags,
   parseEmojiSetEvent,
@@ -31,6 +32,7 @@ vi.mock('@napplet/sdk', () => ({
 
 const PUBKEY = 'a'.repeat(64);
 const BLOB_TAG = ['emoji', 'blobcat', 'https://emoji.example/blobcat.png'];
+type RelayEventResult = { event: NostrEvent };
 
 function makeEvent(overrides: Partial<NostrEvent>): NostrEvent {
   return {
@@ -115,6 +117,15 @@ describe('pure helpers', () => {
     expect(customEmojiItemFromInput('blobcat', 'javascript:alert(1)')).toBeNull();
   });
 
+  it('moves emoji while preserving every item and relative order', () => {
+    const items = [emoji('😀'), emoji('🔥'), emoji('🤙'), emoji('🚀')];
+
+    expect(moveEmojiItem(items, 0, 2).map((item) => item.content)).toEqual(['🔥', '🤙', '😀', '🚀']);
+    expect(moveEmojiItem(items, 3, 0).map((item) => item.content)).toEqual(['🚀', '😀', '🔥', '🤙']);
+    expect(moveEmojiItem(items, 1, 99).map((item) => item.content)).toEqual(['😀', '🤙', '🚀', '🔥']);
+    expect(moveEmojiItem(items, -1, 1).map((item) => item.content)).toEqual(['😀', '🔥', '🤙', '🚀']);
+  });
+
   it('parses a kind 30030 set of standard and custom emoji', () => {
     const summary = parseEmojiSetEvent(makeEvent({
       kind: KIND_EMOJI_SET,
@@ -173,10 +184,10 @@ describe('store', () => {
   });
 
   it('loads the user list and sets from relay events', () => {
-    let onEvent: ((event: NostrEvent) => void) | null = null;
+    let onEvent: ((result: RelayEventResult) => void) | null = null;
     let onEose: (() => void) | null = null;
     vi.mocked(relay.subscribe).mockImplementation((_filters, eventCallback, eoseCallback) => {
-      onEvent = eventCallback as (event: NostrEvent) => void;
+      onEvent = eventCallback as (result: RelayEventResult) => void;
       onEose = eoseCallback as () => void;
       return { close: vi.fn() };
     });
@@ -184,8 +195,8 @@ describe('store', () => {
     const store = createEmojiManagerStore();
     store.init(PUBKEY);
 
-    onEvent!(makeEvent({ kind: KIND_USER_EMOJI_LIST, created_at: 5, tags: [['emoji', '😀'], BLOB_TAG] }));
-    onEvent!(makeEvent({ kind: KIND_EMOJI_SET, created_at: 7, tags: [['d', 'fire'], ['title', 'Fire'], ['emoji', '🔥']] }));
+    onEvent!({ event: makeEvent({ kind: KIND_USER_EMOJI_LIST, created_at: 5, tags: [['emoji', '😀'], BLOB_TAG] }) });
+    onEvent!({ event: makeEvent({ kind: KIND_EMOJI_SET, created_at: 7, tags: [['d', 'fire'], ['title', 'Fire'], ['emoji', '🔥']] }) });
     onEose!();
 
     expect(store.state.loaded).toBe(true);

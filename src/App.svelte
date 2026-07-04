@@ -4,6 +4,7 @@
     createEmojiManagerStore,
     customEmojiItemFromInput,
     isValidIdentifier,
+    moveEmojiItem,
     type EmojiSetSummary,
     type EmojiListItem,
   } from './lib/emoji-sets';
@@ -131,6 +132,14 @@
     dirty = true;
   }
 
+  function reorderEmoji(fromIndex: number, toIndex: number): void {
+    const next = moveEmojiItem(draftEmojis, fromIndex, toIndex);
+    if (next.map((item) => item.key).join('\u0000') === draftEmojis.map((item) => item.key).join('\u0000')) return;
+    draftEmojis = next;
+    dirty = true;
+    status = null;
+  }
+
   function customItems(userList: EmojiListItem[], sets: EmojiSetSummary[]): EmojiListItem[] {
     const seen = new Set<string>();
     const result: EmojiListItem[] = [];
@@ -249,7 +258,7 @@
         <span class="muted">{draftEmojis.length} emoji</span>
       </div>
       <div class="pane-body">
-        <EmojiGrid emojis={draftEmojis} onremove={removeEmoji} />
+        <EmojiGrid emojis={draftEmojis} onremove={removeEmoji} onreorder={reorderEmoji} />
       </div>
     </section>
   </div>
