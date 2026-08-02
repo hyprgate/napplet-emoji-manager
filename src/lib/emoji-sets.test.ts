@@ -27,6 +27,12 @@ vi.mock('@napplet/sdk', () => ({
     getItem: vi.fn(),
     setItem: vi.fn(),
     removeItem: vi.fn(),
+    instance: {
+      getItem: vi.fn(),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      keys: vi.fn(),
+    },
   },
 }));
 
@@ -179,8 +185,18 @@ describe('store', () => {
     vi.clearAllMocks();
     vi.mocked(storage.getItem).mockResolvedValue(null);
     vi.mocked(storage.setItem).mockResolvedValue(undefined);
+    vi.mocked(storage.instance.getItem).mockResolvedValue(null);
+    vi.mocked(storage.instance.setItem).mockResolvedValue(undefined);
     vi.mocked(relay.subscribe).mockReturnValue({ close: vi.fn() });
     vi.mocked(relay.publish).mockResolvedValue(makeEvent({ kind: KIND_USER_EMOJI_LIST, pubkey: PUBKEY }));
+  });
+
+  it('loads its cache from shared napplet storage, not per-window storage', async () => {
+    const store = createEmojiManagerStore();
+    store.init(PUBKEY);
+
+    await vi.waitFor(() => expect(storage.getItem).toHaveBeenCalledWith('emoji-manager:user-list:v1'));
+    expect(storage.instance.getItem).not.toHaveBeenCalled();
   });
 
   it('loads the user list and sets from relay events', () => {
@@ -221,6 +237,11 @@ describe('store', () => {
       content: '',
       tags: [['emoji', '😀'], BLOB_TAG],
     }));
+    expect(storage.setItem).toHaveBeenCalledWith(
+      'emoji-manager:user-list:v1',
+      JSON.stringify([['emoji', '😀'], BLOB_TAG]),
+    );
+    expect(storage.instance.setItem).not.toHaveBeenCalled();
     expect(store.state.userList.map((item) => item.content)).toEqual(['😀', ':blobcat:']);
   });
 
